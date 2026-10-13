@@ -61,6 +61,60 @@ tr.cliquable:hover td { background: #f5f8ff; }
 }
 .menu-dl-liste button:hover { background: #eef1f6; }
 
+/* Classement automatique et sélection multiple */
+tr.averifier { background: #eef2ff; }
+.badge-auto { display: inline-block; background: #dfe6fb; color: #1f3a8a; border-radius: 4px; padding: 0 5px; margin-right: 6px; font-weight: 600; }
+.actions button.ok, button.ok { background: #1e8449; color: #fff; }
+th.case, td.case { width: 28px; }
+button.secondaire, .barre.selection button { padding: 8px 14px; border: 0; border-radius: 6px; background: #2b5fd9; color: #fff; cursor: pointer; }
+button.secondaire, .barre.selection button.secondaire { background: #e3e6ea; color: #222; }
+.barre.selection button.ok { background: #1e8449; }
+.barre.selection button:disabled, form button:disabled { opacity: .5; cursor: default; }
+.barre.selection { position: sticky; top: 0; z-index: 5; background: #fff; padding: 10px 12px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,.12); }
+button.lien { border: 0; background: none; color: #2b5fd9; cursor: pointer; font: inherit; font-weight: 600; padding: 0 4px; }
+.fenetre label.ligne { flex-direction: row; align-items: center; gap: 8px; }
+.regle { display: flex; flex-direction: column; gap: 6px; background: #f5f6f8; padding: 8px 12px; border-radius: 6px; }
+.regle input[type="text"] { padding: 6px 8px; font: inherit; }
+.aide.auto { color: #1f3a8a; background: #eef2ff; padding: 6px 10px; border-radius: 6px; }
+table.regles { margin-bottom: 8px; }
+
+/* Tableau de bord */
+.tdb { display: flex; flex-direction: column; gap: 16px; transition: opacity .2s; }
+.tuiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.tuile, .carte { background: #fff; border-radius: 10px; padding: 14px 16px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+.tuile { display: flex; flex-direction: column; gap: 4px; }
+.tuile-libelle { font-size: 13px; color: #52514e; }
+.tuile-valeur { font-size: 26px; font-weight: 600; color: #0b0b0b; }
+.carte h3 { margin: 0 0 4px; font-size: 16px; }
+.alertes { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.alerte { display: flex; align-items: center; gap: 6px; text-align: left; font: inherit; font-size: 14px; padding: 12px 14px; border-radius: 10px; background: #fff; border: 1px solid #e5e7eb; border-left-width: 4px; }
+.alerte.attention { border-left-color: #e0a100; cursor: pointer; }
+.alerte.attention:hover { background: #fffbeb; }
+.alerte.bon { border-left-color: #1e8449; color: #52514e; }
+.alerte strong { font-size: 18px; }
+.alerte .voir { margin-left: auto; color: #2b5fd9; font-weight: 600; }
+.courbe { position: relative; }
+.courbe svg { width: 100%; height: auto; display: block; outline: none; }
+.courbe svg:focus-visible { outline: 2px solid #2b5fd9; outline-offset: 2px; }
+.courbe .grille { stroke: #eceef1; stroke-width: 1; }
+.courbe .axe-zero { stroke: #c9ced6; stroke-width: 1; }
+.courbe .viseur { stroke: #9aa1ab; stroke-width: 1; }
+.courbe .graduation { font-size: 11px; fill: #6b6b66; font-variant-numeric: tabular-nums; }
+.courbe .etiquette-fin { font-size: 12px; font-weight: 600; fill: #0b0b0b; }
+.infobulle { position: absolute; transform: translate(-50%, calc(-100% - 12px)); pointer-events: none; background: #fff; border: 1px solid #e5e7eb; border-radius: 6px; padding: 6px 10px; box-shadow: 0 4px 12px rgba(0,0,0,.12); display: flex; flex-direction: column; font-size: 12px; color: #52514e; white-space: nowrap; }
+.infobulle strong { font-size: 14px; color: #0b0b0b; }
+.courbe details { margin-top: 6px; font-size: 13px; }
+.courbe details table { max-width: 360px; margin-top: 6px; }
+.grille-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; }
+.barres { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.barres li { display: grid; grid-template-columns: 130px 1fr; align-items: center; gap: 8px; padding: 3px 4px; border-radius: 4px; font-size: 13px; }
+.barres li:hover { background: #f5f8ff; }
+.barre-nom { color: #0b0b0b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.barre-piste { display: flex; align-items: center; gap: 8px; }
+.barre-valeur { height: 14px; min-width: 2px; border-radius: 0 4px 4px 0; }
+.barre-chiffre { white-space: nowrap; color: #0b0b0b; font-variant-numeric: tabular-nums; }
+.muet { color: #6b6b66; }
+
 /* PDF : on masque tout ce qui est hors CR / non classé */
 @media print {
     .no-print, .hors-print { display: none !important; }

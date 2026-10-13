@@ -9,6 +9,9 @@ Projet réel, conçu à partir des besoins du bureau (non techniciens) : cotisat
 - **Import des relevés CSV** (un fichier par mois), avec lecture automatique des colonnes Date, Nature, Motif, Débit / Crédit.
 - **Anti-doublons** : une ligne est ignorée si une transaction avec la même date et le même montant existe déjà dans le mandat.
 - **Classement par mandat** : chaque transaction est rangée dans un *Dossier* (catégorie) et une *Étiquette* (classeur), avec un commentaire.
+- **Classement automatique avec vérification** : à l'import, les règles (« le motif contient… → classeur ») puis les ressemblances avec les transactions déjà classées à la main rangent les nouvelles lignes. Elles restent marquées « à vérifier », avec la raison, jusqu'à confirmation.
+- **Classement groupé** : sélection de plusieurs lignes pour les ranger dans le même classeur ou confirmer leur classement automatique d'un coup.
+- **Tableau de bord** : solde, recettes, dépenses, résultat, alertes (à classer, à vérifier, dépenses sans justificatif), évolution du solde et répartition par catégorie.
 - **Compte de résultat** par mandat : Catégorie › Classeur, avec Charges, Produits et Balance, un bloc « Hors compte de résultat » et un contrôle de cohérence avec le solde du relevé.
 - **Justificatifs** : chaque fichier ajouté à une transaction est envoyé dans Nextcloud, rangé dans `Tresorerie/<mandat>/<catégorie>/<classeur>/`.
 - **Gestion des mandats** : création d'un nouveau mandat en reprenant les classeurs du précédent.
@@ -35,11 +38,13 @@ tresorerie-asso/
 │       │   ├── CsvParser.java               # lecture des relevés CSV
 │       │   ├── OperationController.java     # transactions, import, justificatifs
 │       │   ├── CompteResultatController.java
+│       │   ├── TableauDeBordController.java # chiffres clés, alertes, courbe du solde
+│       │   ├── AutoClassement.java          # règles + suggestions tirées de l'historique
 │       │   ├── ReferentielController.java   # mandats, catégories, classeurs
 │       │   └── NextcloudService.java        # envoi / lecture WebDAV
 │       └── resources/
 │           ├── application.yml
-│           └── db/migration/                # scripts SQL Flyway (V1 à V4)
+│           └── db/migration/                # scripts SQL Flyway (V1 à V5)
 └── frontend/
     └── src/                                 # pages React
 ```
@@ -51,6 +56,8 @@ tresorerie-asso/
 - `classeur` : rattaché à un mandat et à une catégorie (Escape Game, Galette des Rois…).
 - `operation` : ligne du relevé. Un montant négatif est une charge, un montant positif est un produit.
 - `justificatif` : chemin du fichier stocké dans Nextcloud.
+- `regle_classement` : « si le motif contient X, ranger dans tel classeur ». Recopiée avec les classeurs lors d'un nouveau mandat.
+- `operation.classement_auto` : raison du classement automatique ; vide une fois la ligne confirmée ou classée à la main.
 
 Le schéma est créé et mis à jour automatiquement par Flyway au démarrage.
 
@@ -111,10 +118,13 @@ Ouvrir http://localhost:5173. Les appels `/api` sont redirigés vers le backend 
 
 ## Utilisation
 
-1. **Transactions › Importer un relevé CSV** : choisir le fichier du mois. Le message d'import indique le nombre de lignes ajoutées et de doublons ignorés.
-2. **Modifier** sur une ligne : choisir le dossier (catégorie), l'étiquette (classeur), ajouter un commentaire et des justificatifs.
-3. **Compte de résultat** : consulter les charges, produits et balances par catégorie et classeur. Les lignes non classées apparaissent à part.
-4. **Réglages** : créer un nouveau mandat (avec reprise des classeurs) ou ajouter un classeur.
+1. **Tableau de bord** : vue d'ensemble du mandat. Un clic sur une alerte ouvre les transactions concernées.
+2. **Transactions › Importer un relevé CSV** : choisir le fichier du mois. Le message indique les lignes ajoutées, classées automatiquement, à classer et les doublons ignorés.
+3. **Afficher › À vérifier** : contrôler les lignes classées automatiquement (raison affichée), puis ✓ pour confirmer une ligne, ou tout cocher et « Confirmer le classement automatique ».
+4. **Cases à cocher** : sélectionner plusieurs lignes pour les ranger d'un coup dans un classeur.
+5. **Modifier** sur une ligne : choisir le dossier (catégorie), l'étiquette (classeur), ajouter un commentaire et des justificatifs. La case « Classer ici automatiquement… » crée une règle et l'applique aux lignes encore à classer.
+6. **Compte de résultat** : consulter les charges, produits et balances par catégorie et classeur. Les lignes non classées apparaissent à part.
+7. **Réglages** : gérer les règles de classement, créer un nouveau mandat (avec reprise des classeurs et des règles) ou ajouter un classeur.
 
 ## Format du fichier CSV
 
@@ -134,13 +144,19 @@ Un autre format de banque se règle dans `CsvParser.java`.
 | POST | `/api/mandats` | Créer un mandat (option : copier les classeurs d'un autre) |
 | GET | `/api/categories` | Liste des catégories |
 | GET / POST | `/api/classeurs` | Classeurs d'un mandat / création |
-| GET | `/api/operations` | Transactions (filtres : mandat, mois, à classer) |
-| POST | `/api/operations/import` | Import d'un CSV |
-| PUT | `/api/operations/{id}` | Modifier classeur et commentaire |
+| GET | `/api/operations` | Transactions (filtres : mandat, mois, à classer, à vérifier, sans justificatif) |
+| POST | `/api/operations/import` | Import d'un CSV, suivi du classement automatique |
+| POST | `/api/operations/auto-classer` | Classement automatique des lignes à classer d'un mandat |
+| POST | `/api/operations/classer` | Ranger plusieurs transactions dans un classeur |
+| POST | `/api/operations/confirmer` | Confirmer des classements automatiques |
+| PUT | `/api/operations/{id}` | Modifier classeur et commentaire (vaut confirmation) |
 | DELETE | `/api/operations/{id}` | Supprimer une transaction |
 | POST | `/api/operations/{id}/justificatifs` | Ajouter un justificatif (Nextcloud) |
 | GET | `/api/justificatifs/{id}` | Télécharger un justificatif |
 | GET | `/api/compte-resultat` | Compte de résultat d'un mandat |
+| GET | `/api/tableau-de-bord` | Chiffres clés, alertes, courbe du solde, répartition par catégorie |
+| GET / POST | `/api/regles` | Règles de classement d'un mandat / création |
+| DELETE | `/api/regles/{id}` | Supprimer une règle |
 
 ## Vérifier les chiffres en SQL
 
@@ -173,4 +189,3 @@ GROUP BY c.nom, cl.nom;
 - Connexion par mot de passe et rôles (trésorier, bureau en lecture seule)
 - Export du compte de résultat en PDF ou Excel
 - Déplacement automatique des justificatifs lors d'un changement de classeur
-- Règles de classement automatique selon le motif

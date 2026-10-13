@@ -21,24 +21,32 @@ import java.util.*;
 @RequestMapping("/api")
 public class OperationController {
 
+    /** Dépense sans justificatif (les mouvements « hors compte de résultat » n'en demandent pas). Alias : o. */
+    static final String SANS_JUSTIFICATIF = """
+            o.montant < 0 AND NOT EXISTS (SELECT 1 FROM justificatif j WHERE j.operation_id = o.id)
+            AND NOT COALESCE((SELECT c.hors_cr FROM classeur cl JOIN categorie c ON c.id = cl.categorie_id
+                              WHERE cl.id = o.classeur_id), false)""";
+
     private final JdbcClient db;
     private final NextcloudService nextcloud;
+    private final AutoClassement autoClassement;
 
-    public OperationController(JdbcClient db, NextcloudService nextcloud) {
+    public OperationController(JdbcClient db, NextcloudService nextcloud, AutoClassement autoClassement) {
         this.db = db;
         this.nextcloud = nextcloud;
-    }
-
-    public record Classement(Integer classeurId) {
+        this.autoClassement = autoClassement;
     }
 
     @GetMapping("/operations")
     public List<Map<String, Object>> liste(@RequestParam int mandatId,
                                            @RequestParam(required = false) String mois,
                                            @RequestParam(required = false) Integer classeurId,
-                                           @RequestParam(defaultValue = "false") boolean aClasser) {
-        StringBuilder sql = new StringBuilder(
-                "SELECT id, date_operation, libelle, nature, montant, classeur_id , commentaire FROM operation WHERE mandat_id = ?");
+                                           @RequestParam(defaultValue = "false") boolean aClasser,
+                                           @RequestParam(defaultValue = "false") boolean aVerifier,
+                                           @RequestParam(defaultValue = "false") boolean sansJustificatif) {
+        StringBuilder sql = new StringBuilder("""
+                SELECT id, date_operation, libelle, nature, montant, classeur_id, commentaire, classement_auto
+                FROM operation o WHERE mandat_id = ?""");
         List<Object> p = new ArrayList<>(List.of(mandatId));
         if (classeurId != null) {
             sql.append(" AND classeur_id = ?"); p.add(classeurId);
@@ -48,6 +56,8 @@ public class OperationController {
             p.add(mois);
         }
         if (aClasser) sql.append(" AND classeur_id IS NULL");
+        if (aVerifier) sql.append(" AND classement_auto IS NOT NULL");
+        if (sansJustificatif) sql.append(" AND ").append(SANS_JUSTIFICATIF);
         sql.append(" ORDER BY date_operation DESC, id DESC");
 
         List<Map<String, Object>> ops = db.sql(sql.toString()).params(p).query().listOfRows();
@@ -70,6 +80,7 @@ public class OperationController {
 
     /**
      * Import d'un CSV de relevé. Ré-importer le même fichier ne crée pas de doublons.
+     * Les nouvelles lignes passent ensuite par le classement automatique (règles puis historique).
      */
     @PostMapping("/operations/import")
     public Map<String, Object> importer(@RequestParam int mandatId, @RequestParam MultipartFile file) {
@@ -80,27 +91,68 @@ public class OperationController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
         }
 
-        int ajoutees = 0;
+        List<Long> nouvelles = new ArrayList<>();
         Map<String, Integer> occurrences = new HashMap<>(); // 2 lignes identiques le même jour restent distinctes
         for (var l : lignes) {
             String base = mandatId + "|" + l.date() + "|" + l.libelle() + "|" + l.montant();
             int n = occurrences.merge(base, 1, Integer::sum);
-            ajoutees += db.sql("""
+            db.sql("""
                             INSERT INTO operation(mandat_id, date_operation, libelle, nature, montant, empreinte)
-                            VALUES (?,?,?,?,?,?) ON CONFLICT (empreinte) DO NOTHING""")
-                    .params(mandatId, l.date(), l.libelle(), l.nature(), l.montant(), sha256(base + "|" + n)).update();
+                            VALUES (?,?,?,?,?,?) ON CONFLICT (empreinte) DO NOTHING RETURNING id""")
+                    .params(mandatId, l.date(), l.libelle(), l.nature(), l.montant(), sha256(base + "|" + n))
+                    .query(Long.class).optional().ifPresent(nouvelles::add);
         }
-        return Map.of("lues", lignes.size(), "ajoutees", ajoutees, "doublonsIgnores", lignes.size() - ajoutees);
+        int auto = autoClassement.appliquer(mandatId, nouvelles);
+        return Map.of("lues", lignes.size(), "ajoutees", nouvelles.size(), "doublonsIgnores", lignes.size() - nouvelles.size(),
+                "classeesAuto", auto, "aClasser", nouvelles.size() - auto);
+    }
+
+    /** Relance le classement automatique sur toutes les lignes encore à classer du mandat (après ajout d'une règle). */
+    @PostMapping("/operations/auto-classer")
+    public Map<String, Object> autoClasser(@RequestParam int mandatId) {
+        List<Long> ids = db.sql("SELECT id FROM operation WHERE mandat_id = ? AND classeur_id IS NULL")
+                .param(mandatId).query(Long.class).list();
+        int auto = autoClassement.appliquer(mandatId, ids);
+        return Map.of("classees", auto, "restantes", ids.size() - auto);
+    }
+
+    public record ClassementGroupe(List<Long> ids, Integer classeurId) {}
+
+    /** Range plusieurs transactions d'un coup dans le même classeur (qui doit être du même mandat). */
+    @PostMapping("/operations/classer")
+    public Map<String, Object> classer(@RequestBody ClassementGroupe g) {
+        if (g.classeurId() == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Choisis un classeur.");
+        if (g.ids() == null || g.ids().isEmpty()) return Map.of("modifiees", 0);
+        List<Object> p = new ArrayList<>(List.of(g.classeurId()));
+        p.addAll(g.ids());
+        p.add(g.classeurId());
+        int n = db.sql("UPDATE operation SET classeur_id = ?, classement_auto = NULL WHERE id IN ("
+                        + String.join(",", Collections.nCopies(g.ids().size(), "?"))
+                        + ") AND mandat_id = (SELECT mandat_id FROM classeur WHERE id = ?)")
+                .params(p).update();
+        return Map.of("modifiees", n);
+    }
+
+    public record Confirmation(List<Long> ids) {}
+
+    /** Valide le classement automatique proposé : les lignes ne sont plus « à vérifier ». */
+    @PostMapping("/operations/confirmer")
+    public Map<String, Object> confirmer(@RequestBody Confirmation c) {
+        if (c.ids() == null || c.ids().isEmpty()) return Map.of("confirmees", 0);
+        int n = db.sql("UPDATE operation SET classement_auto = NULL WHERE classement_auto IS NOT NULL AND id IN ("
+                        + String.join(",", Collections.nCopies(c.ids().size(), "?")) + ")")
+                .params(c.ids()).update();
+        return Map.of("confirmees", n);
     }
 
     public record Modification(Integer classeurId, String commentaire, String libelle) {}
 
     @PutMapping("/operations/{id}")
     public void modifier(@PathVariable long id, @RequestBody Modification m) {
-        // si le motif envoyé est vide, on garde l'ancien
+        // si le motif envoyé est vide, on garde l'ancien ; enregistrer à la main vaut confirmation du classement
         db.sql("""
             UPDATE operation
-            SET classeur_id = ?, commentaire = ?, libelle = COALESCE(NULLIF(TRIM(?), ''), libelle)
+            SET classeur_id = ?, commentaire = ?, libelle = COALESCE(NULLIF(TRIM(?), ''), libelle), classement_auto = NULL
             WHERE id = ?""")
                 .params(m.classeurId(), m.commentaire(), m.libelle(), id).update();
     }
