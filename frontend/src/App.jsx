@@ -3,10 +3,12 @@ import {api} from './api.js'
 import Transactions from './Transactions.jsx'
 import CompteResultat from './CompteResultat.jsx'
 import Reglages from './Reglages.jsx'
+import TableauDeBord from './TableauDeBord.jsx'
 import {useAuth} from './auth/AuthContext'
 
 export default function App() {
-    const [onglet, setOnglet] = useState('transactions')
+    const [onglet, setOnglet] = useState('tableau')
+    const [filtre, setFiltre] = useState('')
     const [mandats, setMandats] = useState([])
     const [mandatId, setMandatId] = useState(null)
     const [classeurs, setClasseurs] = useState([])
@@ -17,6 +19,12 @@ export default function App() {
         if (!mandatId && m.length) setMandatId(m[0].id)
     })
     const chargerClasseurs = () => mandatId && api('/classeurs?mandatId=' + mandatId).then(setClasseurs)
+
+    // depuis le tableau de bord : ouvre les transactions avec le bon filtre
+    const voir = (f) => {
+        setFiltre(f)
+        setOnglet('transactions')
+    }
 
     useEffect(() => {
         chargerMandats()
@@ -36,7 +44,7 @@ export default function App() {
                     </select>
                 </label>
                 <nav>
-                    {[['transactions', 'Transactions'], ['cr', 'Compte de résultat'], ['reglages', 'Réglages']].map(([k, l]) =>
+                    {[['tableau', 'Tableau de bord'], ['transactions', 'Transactions'], ['cr', 'Compte de résultat'], ['reglages', 'Réglages']].map(([k, l]) =>
                         <button key={k} className={onglet === k ? 'actif' : ''}
                                 onClick={() => setOnglet(k)}>{l}</button>)}
                 </nav>
@@ -45,7 +53,9 @@ export default function App() {
                     <button onClick={logout}>Déconnexion</button>
                 </div>
             </header>
-            {mandatId && onglet === 'transactions' && <Transactions mandatId={mandatId} classeurs={classeurs}/>}
+            {mandatId && onglet === 'tableau' && <TableauDeBord mandatId={mandatId} onVoir={voir}/>}
+            {mandatId && onglet === 'transactions' &&
+                <Transactions mandatId={mandatId} classeurs={classeurs} filtre={filtre} setFiltre={setFiltre}/>}
             {mandatId && onglet === 'cr' && <CompteResultat mandatId={mandatId}/>}
             {onglet === 'reglages' && <Reglages mandats={mandats} mandatId={mandatId} classeurs={classeurs}
                                                 onChange={() => {
